@@ -1,0 +1,9 @@
+[package]
+name = "rrb"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+itertools = "0.13.0"
+lender = "0.2.9"
+rand = "0.8.5"
