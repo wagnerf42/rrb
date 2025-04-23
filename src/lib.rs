@@ -510,8 +510,13 @@ impl<T: std::fmt::Debug> Node<T> {
             let missing = target_size.checked_sub(child_to_fill.degree());
             // if someone has more than needed then we are fine
             // since it means the "hole" is on the right
-            let missing = if let Some(m) = missing { m } else { return };
+            let missing = if let Some(m) = missing {
+                m
+            } else {
+                return;
+            };
             if missing == 0 {
+                child_to_fill.compute_sizes(level);
                 if let Some((next_child, _)) = children_to_adjust.next() {
                     child_to_fill = next_child;
                     continue;
