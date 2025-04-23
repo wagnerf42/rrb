@@ -480,7 +480,7 @@ impl<T: std::fmt::Debug> Node<T> {
         let leftover_size = total_size - (max_degree - 1) * total_children;
 
         // ok we have two cases here.
-        let target_sizes = if leftover_size > total_children {
+        let mut target_sizes = if leftover_size > total_children {
             // there is not enough to rebalance so the last node will be of bad degree
             (std::iter::repeat(max_degree - 1)
                 .take(total_children)
@@ -494,47 +494,93 @@ impl<T: std::fmt::Debug> Node<T> {
             .take(total_children)
         };
 
+        // have a complex struct to manage all mutable borrows
+        struct Children<'a, T> {
+            left_child: Option<&'a mut (Node<T>, usize)>,
+            right_children: &'a mut [(Node<T>, usize)],
+            current_to_fill: usize,
+            current_filler: usize,
+        }
+        impl<'a, T> Children<'a, T> {
+            fn get_mut_references(&mut self) -> Option<[&mut Node<T>; 2]> {
+                if let Some((left, _)) = &mut self.left_child {
+                    if self.current_to_fill == 0 {
+                        self.right_children
+                            .get_mut(self.current_filler - 1)
+                            .map(|(b, _)| [left, b])
+                    } else {
+                        self.right_children
+                            .get_disjoint_mut([self.current_to_fill - 1, self.current_filler - 1])
+                            .ok()
+                            .map(|[(a, _), (b, _)]| [a, b])
+                    }
+                } else {
+                    self.right_children
+                        .get_disjoint_mut([self.current_to_fill, self.current_filler])
+                        .ok()
+                        .map(|[(a, _), (b, _)]| [a, b])
+                }
+            }
+            fn advance_to_fill(&mut self) {
+                self.current_to_fill += 1;
+                if self.current_filler == self.current_to_fill {
+                    self.current_filler += 1;
+                }
+            }
+            fn advance_filler(&mut self) {
+                self.current_filler += 1;
+            }
+
+            fn remaining_children(&mut self) -> impl Iterator<Item = &mut Node<T>> {
+                let n = self.right_children.len();
+                self.right_children[self.current_to_fill.min(n)..]
+                    .iter_mut()
+                    .map(|(c, _)| c)
+            }
+        }
+
         // there is a special case when left is already good
         // it's even possible that there is not enough to do even max_degree-1
-        let mut children_to_adjust = if left_size >= max_degree - 1 {
-            None // if left is already ok, skip it
-        } else {
-            self.last_child()
-        }
-        .into_iter()
-        .chain(other.children_mut().unwrap());
-
-        // ensure all children have degree max_degree or max_degree-1
-        let mut child_to_fill = &mut children_to_adjust.next().unwrap().0;
-        for target_size in target_sizes {
-            let missing = target_size.checked_sub(child_to_fill.degree());
-            // if someone has more than needed then we are fine
-            // since it means the "hole" is on the right
-            let missing = if let Some(m) = missing {
-                m
-            } else {
-                return;
-            };
-            if missing == 0 {
-                child_to_fill.compute_sizes(level);
-                if let Some((next_child, _)) = children_to_adjust.next() {
-                    child_to_fill = next_child;
-                    continue;
+        let mut children = Children {
+            left_child: (left_size < max_degree - 1)
+                .then(|| self.last_child())
+                .flatten(),
+            right_children: other.children_mut().unwrap().as_mut_slice(),
+            current_to_fill: 0,
+            current_filler: 1,
+        };
+        if let Some(mut target_size) = target_sizes.next() {
+            while let Some([child_to_fill, filler]) = children.get_mut_references() {
+                let missing = target_size.checked_sub(child_to_fill.degree());
+                // if someone has more than needed then we are fine
+                // since it means the "hole" is on the right
+                let missing = if let Some(m) = missing { m } else { break };
+                let vector_to_fill = getter(child_to_fill);
+                let vector_to_drain = getter(filler);
+                let (moved, advance_to_fill, advance_filler) = if missing <= vector_to_drain.len() {
+                    (missing, true, vector_to_drain.len() == missing)
                 } else {
-                    break;
+                    (vector_to_drain.len(), false, true)
                 };
+                vector_to_fill.extend(vector_to_drain.drain(0..moved));
+                if advance_to_fill {
+                    // update sizes after filling
+                    child_to_fill.compute_sizes(level);
+                    target_size = target_sizes.next().unwrap_or_default();
+                    children.advance_to_fill()
+                }
+                if advance_filler {
+                    children.advance_filler()
+                }
             }
-            let next_child = &mut children_to_adjust.next().unwrap().0;
-            let vector_to_fill = getter(child_to_fill);
-            let vector_to_drain = getter(next_child);
-            vector_to_fill.extend(vector_to_drain.drain(0..missing));
-            // update sizes after filling
-            child_to_fill.compute_sizes(level);
-            child_to_fill = next_child;
         }
-        if child_to_fill.degree() == 0 {
+        for remaining_child in children.remaining_children() {
+            remaining_child.compute_sizes(level);
+        }
+        let right_children = other.children_mut().unwrap();
+        if right_children.last_mut().map(|(c, _)| c.degree()) == Some(0) {
             // remove last (now empty) child on the right
-            other.children_mut().unwrap().pop();
+            right_children.pop();
         }
     }
 
