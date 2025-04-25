@@ -73,6 +73,19 @@ impl<T: std::fmt::Debug> RRBTree<T> {
         iter.explore_towards_leaf();
         iter
     }
+    pub fn insert(&mut self, index: usize, new_value: T) {
+        assert!(index <= self.len);
+        if index == 0 {
+            let mut left = std::iter::once(new_value).collect::<RRBTree<T>>();
+            std::mem::swap(&mut left, self);
+            self.fuse_with(left);
+        } else {
+            let right = self.split_at(index);
+            self.push(new_value);
+            self.fuse_with(right);
+        }
+    }
+
     pub fn remove(&mut self, index: usize) {
         assert!(self.len > index);
         if index + 1 == self.len {
@@ -566,11 +579,11 @@ impl<T: std::fmt::Debug> Node<T> {
                 if advance_to_fill {
                     // update sizes after filling
                     child_to_fill.compute_sizes(level);
+                    if advance_filler {
+                        children.advance_filler()
+                    }
                     target_size = target_sizes.next().unwrap_or_default();
                     children.advance_to_fill()
-                }
-                if advance_filler {
-                    children.advance_filler()
                 }
             }
         }
