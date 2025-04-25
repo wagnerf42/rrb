@@ -575,13 +575,17 @@ impl<T: std::fmt::Debug> Node<T> {
                 } else {
                     (vector_to_drain.len(), false, true)
                 };
+                eprintln!("missing: {missing} to_drain: {}", vector_to_drain.len());
+                eprintln!("{moved} {advance_to_fill} {advance_filler}");
                 vector_to_fill.extend(vector_to_drain.drain(0..moved));
                 if advance_to_fill {
                     // update sizes after filling
                     child_to_fill.compute_sizes(level);
-                    if advance_filler {
-                        children.advance_filler()
-                    }
+                }
+                if advance_filler {
+                    children.advance_filler()
+                }
+                if advance_to_fill {
                     target_size = target_sizes.next().unwrap_or_default();
                     children.advance_to_fill()
                 }
